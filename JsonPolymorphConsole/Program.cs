@@ -5,8 +5,9 @@ using SampleClassLibrary;
 
 //You can white-list or black-list (nested) containers' inner types. Black-list has priority
 var converter = new PolymorphJsonConverter(
+	skipUnresolvedTypes: true
 	//includedTypesOnly: new List<Type>() { typeof(IBar) },
-	//excludedTypes: new List<Type>() { typeof(IFoo) }
+	//	excludedTypes: new List<Type>() { typeof(IFoo) }
 	);
 JsonSerializerSettings settings = new JsonSerializerSettings()
 {
@@ -25,9 +26,9 @@ var list = new List<IBar>()
 			new C() { a = 99 },
 			new D() { b = "dynamic data", IgnoredString = "IGNORED DATA"} 
 		},
-		foos = new List<IFoo>() { 
-			new A() {a = "123456789"},
-			new B() { b = 999999 } 
+		foos = new Dictionary<string, IFoo>() {
+			{ "1", new A() {a = "123456789"} },
+			{ "2", new B() { b = 999999 } } 
 		} 
 	}
 };

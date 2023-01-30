@@ -10,13 +10,24 @@ namespace JsonPolymorph
 	public class PolymorphJsonConverter : JsonConverter
 	{
 		readonly IEnumerable<Type> includedTypesOnly = null, excludedTypes = null;
+		readonly bool skipUnresolvedTypes = true;
 
+		public PolymorphJsonConverter()
+		{
+		}
+		/// <param name="skipUnresolvedTypes">If type (custom or other) is generic but non-default-collection or in other special 
+		/// cases the <paramref name="skipUnresolvedTypes"/> argument will decide will the exception be thrown or not</param>
+		public PolymorphJsonConverter(bool skipUnresolvedTypes)
+		{
+			this.skipUnresolvedTypes = skipUnresolvedTypes;
+		}
 		/// <summary>
 		/// Include or exclude types from (de)serialization. You can also use [Newtonsoft.JsonIgnore] attribute
 		/// </summary>
 		/// <param name="includedTypesOnly">Only these interface types will be resolved and (de)serialized</param>
 		/// <param name="excludedTypes">These interface types will NOT be resolved and (de)serialized</param>
-		public PolymorphJsonConverter(IEnumerable<Type> includedTypesOnly = null, IEnumerable<Type> excludedTypes = null)
+		public PolymorphJsonConverter(bool skipUnresolvedTypes = true, IEnumerable < Type> includedTypesOnly = null, IEnumerable<Type> excludedTypes = null)
+			:this(skipUnresolvedTypes)
 		{
 			this.includedTypesOnly = includedTypesOnly;
 			this.excludedTypes = excludedTypes;
@@ -25,7 +36,7 @@ namespace JsonPolymorph
 		static readonly string typeKey = "TypeFullName";
 		public override bool CanConvert(Type objectType)
 		{
-			return TryGetContainerType(objectType, out _);
+			return TryGetContainerType(objectType, out var inner);
 		}
 
 		bool InnerContainerTypeHandlable(Type innerType)
@@ -57,11 +68,87 @@ namespace JsonPolymorph
 			}
 			return false;
 		}
-		bool TryGetContainerType(object source, out Type containerInnerType)=>TryGetContainerType(source.GetType(), out containerInnerType);
+		bool TryGetContainerType(object source, out Type containerInnerType) => TryGetContainerType(source.GetType(), out containerInnerType);
 
 		public override bool CanWrite
 		{
 			get { return true; }
+		}
+
+		//TODO add support for tuples there and here (need to create them as well)
+		void ReadDataToArray(JArray source, Array target, JsonSerializer serializer)
+		{
+			int i = 0;
+			foreach (var element in source)
+			{
+				if (i == 0)
+				{
+					i++;
+					continue;
+				}
+				var splt = element[typeKey]!.ToString().Split('\\');
+				string assemblyName = splt[0], typeFullName = splt[1];
+
+				object created = null!;
+				try
+				{
+					created = Activator.CreateInstance(Assembly.Load(assemblyName).GetType(typeFullName)!)!;
+				}
+				catch (Exception e)
+				{
+					if (!skipUnresolvedTypes)
+						throw new JsonPolymorphAnnotationException("JsonPolymporph container type defined in annotation not resolved inside " +
+							"solution. You may be missing some libraries.");
+					created = null!;
+				}
+				if (created != null)
+				{
+					try
+					{
+						serializer.Populate(element.CreateReader(), created);
+					}
+					catch (Exception e)
+					{
+						if (!skipUnresolvedTypes)
+							throw new JsonPolymorphTypeException("Error handling inner collection. Some collections may be not supported even by Newtonsoft.Json", e);
+					}
+				}
+				target.SetValue(created, i++ - 1);
+			}
+		}
+
+		bool TryCreateContainerType(JArray jarray, JsonSerializer serializer, out Type containerType, out Type innerType, out Array arr)
+		{
+			arr = null!;
+			innerType = null!; containerType = null!;
+			//we just need first element but who cares
+			foreach (var element in jarray)
+			{
+				//first element is TypeAnnotation for array initialization
+				var typeAnnotation = new TypeAnnotation();
+				serializer.Populate(element.CreateReader(), typeAnnotation);
+				innerType = typeAnnotation.LoadTypeFromAssembly(skipUnresolvedTypes);
+				//failed to load types
+				if(innerType == null)
+					return false;
+				arr = Array.CreateInstance(innerType, jarray.Count - 1);
+
+				try
+				{
+					containerType = Assembly.Load(typeAnnotation.containerAsmName).GetType(typeAnnotation.containerType)!;
+				}
+				catch (Exception e)
+				{
+					if (!skipUnresolvedTypes)
+						if (typeAnnotation == null)
+							throw new JsonPolymorphAnnotationException("JsonPolymporph annotation not found! Cannot resolve types!", e);
+						else
+							throw new JsonPolymorphAnnotationException("JsonPolymporph container type defined in annotation not resolved inside " +
+								"solution. You may be missing some libraries.");
+				}
+				return InnerContainerTypeHandlable(innerType);
+			}
+			return false;
 		}
 
 		public override object ReadJson(JsonReader reader,
@@ -73,40 +160,29 @@ namespace JsonPolymorph
 				return null;
 			// Load JObject from stream
 			JArray root = JArray.Load(reader);
-			//create array of target type
+			
 			Array arr = null;
-			int i = 0;
 			bool useGenericType = false;
 			Type containerType = null, innerType = null;
-			foreach (var element in root)
-			{
-				//first element is TypeAnnotation for array initialization
-				if (i == 0 && arr == null)
-				{
-					var typeAnnotation = new TypeAnnotation();
-					serializer.Populate(element.CreateReader(), typeAnnotation);
-					//TODO add try catch for errors in loading assemblies?
-					innerType = typeAnnotation.LoadTypeFromAssembly();
-					arr = Array.CreateInstance(innerType, root.Count - 1);
-
-					containerType = Assembly.Load(typeAnnotation.containerAsmName).GetType(typeAnnotation.containerType);
-					
-					if (!InnerContainerTypeHandlable(innerType))
-						return null;
-					useGenericType = !containerType.IsArray && containerType.IsGenericType;
-					continue;
-				}
-				var splt = element[typeKey]!.ToString().Split('\\');
-				string assemblyName = splt[0], typeFullName = splt[1];
-				//TODO add try catch for errors in loading assemblies?
-				var created = Activator.CreateInstance(Assembly.Load(assemblyName).GetType(typeFullName)!)!;
-				serializer.Populate(element.CreateReader(), created);
-				arr.SetValue(created, i++);
-			}
+			
+			TryCreateContainerType(root, serializer, out containerType, out innerType, out arr);
+			useGenericType = !containerType.IsArray && containerType.IsGenericType;
+			ReadDataToArray(root, arr, serializer);
+			//convert array to generic
 			if (!objectType.IsArray && objectType.IsGenericType && useGenericType)
 			{
 				containerType = containerType.MakeGenericType(innerType);
-				return Activator.CreateInstance(containerType, arr);
+				try
+				{
+					return Activator.CreateInstance(containerType, arr)!;
+				}
+				catch(Exception e)
+				{
+					if (!skipUnresolvedTypes)
+						throw new JsonPolymorphAnnotationException("Cannot create the instance of container. The container class may " +
+							"be missing or dll ref unresolved", e);
+					return null!;
+				}
 			}
 			return arr;
 		}
@@ -115,9 +191,18 @@ namespace JsonPolymorph
 		{
 			public string innerAsmName, innerTypeName, containerAsmName, containerType;
 
-			public Type LoadTypeFromAssembly()
+			public Type LoadTypeFromAssembly(bool skipUnresolvedTypes)
 			{
-				return Assembly.Load(innerAsmName).GetType(innerTypeName);
+				try
+				{
+					return Assembly.Load(innerAsmName).GetType(innerTypeName)!;
+				}
+				catch (Exception e)
+				{
+					if(!skipUnresolvedTypes)
+						throw new JsonPolymorphAnnotationException("Type defined in annotation can not be loaded! You may be missing dlls.", e);
+					return null;
+				}
 			}
 		}
 

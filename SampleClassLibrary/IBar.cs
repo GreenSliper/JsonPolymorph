@@ -32,11 +32,12 @@ namespace SampleClassLibrary
 		public string b = "sample data";
 		[JsonIgnore]
 		public string IgnoredString { get; set; }
+		public Dictionary<string, string> dictTest = new Dictionary<string, string>() { { "1", "a" }, { "2", "b" } };
 	}
 
 	public class E : IBar
 	{
 		public IBar[] bars;
-		public List<IFoo> foos;
+		public Dictionary<string, IFoo> foos;
 	}
 }
