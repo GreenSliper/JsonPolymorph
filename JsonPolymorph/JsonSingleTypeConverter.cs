@@ -41,7 +41,7 @@ namespace JsonPolymorph
 			{
 				if (!skipUnresolvedTypes)
 					throw new JsonPolymorphAnnotationException("JsonPolymporph container type defined in annotation not resolved inside " +
-						"solution. You may be missing some libraries.");
+						"solution. You may be missing some libraries.", e);
 				created = null!;
 			}
 			return created;

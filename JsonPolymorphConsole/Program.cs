@@ -9,14 +9,13 @@ var converter = new PolymorphJsonConverter(
 	//includedTypesOnly: new List<Type>() { typeof(IBar) },
 	//	excludedTypes: new List<Type>() { typeof(IFoo) }
 	);
-//var attrConverter = new JsonSingleTypeConverter<IFoo>();
 JsonSerializerSettings settings = new JsonSerializerSettings()
 {
 	Formatting = Formatting.Indented,
+	//this is disabled to show PolymorphJsonConverter. You can experiment with its abilities!
 	//TypeNameHandling = TypeNameHandling.Auto
 };
 settings.Converters.Add(converter);
-//settings.Converters.Add(attrConverter);
 
 //complex dynamic structure to serialize
 var list = new List<IBar>()

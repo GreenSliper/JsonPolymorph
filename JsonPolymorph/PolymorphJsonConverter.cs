@@ -28,7 +28,7 @@ namespace JsonPolymorph
 		/// <param name="includedTypesOnly">Only these interface types will be resolved and (de)serialized</param>
 		/// <param name="excludedTypes">These interface types will NOT be resolved and (de)serialized</param>
 		public PolymorphJsonConverter(bool skipUnresolvedTypes = true, IEnumerable<Type> includedTypesOnly = null, IEnumerable<Type> excludedTypes = null)
-			:this(skipUnresolvedTypes)
+			: this(skipUnresolvedTypes)
 		{
 			this.includedTypesOnly = includedTypesOnly;
 			this.excludedTypes = excludedTypes;
@@ -53,10 +53,10 @@ namespace JsonPolymorph
 
 		bool supportKvp = true, supportTuples = true;
 
-		bool TryGetContainerType(Type objectType, out Type containerInnerType) 
+		bool TryGetContainerType(Type objectType, out Type containerInnerType)
 		{
 			containerInnerType = null;
-			if(objectType == null)
+			if (objectType == null)
 				return false;
 			if (objectType.IsArray)
 			{
@@ -93,40 +93,32 @@ namespace JsonPolymorph
 			get { return true; }
 		}
 
+		object CreateInnerTypeObject(Type type, JToken jObject, JsonSerializer serializer)
+		{
+			object result = null;
+			if (type.IsJValueType())
+				result = jObject.ToObject(type, serializer)!;
+			else
+			{
+				if (type.IsInterface)
+				{
+					var splt = jObject[typeKey]!.ToString().Split('\\');
+					string assemblyName = splt[0], typeFullName = splt[1];
+					result = Activator.CreateInstance(Assembly.Load(assemblyName).GetType(typeFullName)!)!;
+				}
+				else
+					result = Activator.CreateInstance(type)!;
+				serializer.Populate(jObject.CreateReader(), result);
+			}
+			return result;
+		}
+
 		object CreateKvp(JArray tupleArray, Type innerType, JsonSerializer serializer)
 		{
 			(var keyType, var valueType) = innerType.GetKeyValuePairTypes();
 
-			object key = null,
-				value = null;
-			if (keyType.IsJValueType())
-				key = tupleArray[0].ToObject(keyType, serializer)!;
-			else
-			{
-				if (keyType.IsInterface)
-				{
-					var splt = tupleArray[0][typeKey]!.ToString().Split('\\');
-					string assemblyName = splt[0], typeFullName = splt[1];
-					key = Activator.CreateInstance(Assembly.Load(assemblyName).GetType(typeFullName)!)!;
-					serializer.Populate(tupleArray[0].CreateReader(), key);
-				}
-				else
-					key = Activator.CreateInstance(keyType)!;
-			}
-			if (valueType.IsJValueType())
-				value = tupleArray[1].ToObject(valueType, serializer)!;
-			else
-			{
-				if (valueType.IsInterface)
-				{
-					var splt = tupleArray[1][typeKey]!.ToString().Split('\\');
-					string assemblyName = splt[0], typeFullName = splt[1];
-					value = Activator.CreateInstance(Assembly.Load(assemblyName).GetType(typeFullName)!)!;
-				}
-				else
-					value = Activator.CreateInstance(valueType)!;
-				serializer.Populate(tupleArray[1].CreateReader(), value);
-			}
+			object key = CreateInnerTypeObject(keyType, tupleArray[0], serializer),
+				value = CreateInnerTypeObject(valueType, tupleArray[1], serializer);
 			var result = Activator.CreateInstance(innerType, key, value);
 			return result;
 		}
@@ -136,24 +128,8 @@ namespace JsonPolymorph
 			object[] args = new object[tupleArray.Count];
 			var tupleTypes = innerType.GetTupleTypes();
 			for (int i = 0; i < args.Length; i++)
-			{
-				if (tupleTypes[i].IsJValueType())
-					args[i] = tupleArray[i].ToObject(tupleTypes[i], serializer)!;
-				else
-				{
-					if (tupleTypes[i].IsInterface)
-					{
-						var splt = tupleArray[i][typeKey]!.ToString().Split('\\');
-						string assemblyName = splt[0], typeFullName = splt[1];
-						args[i] = Activator.CreateInstance(Assembly.Load(assemblyName).GetType(typeFullName)!)!;
-					}
-					else
-						args[i] = Activator.CreateInstance(tupleTypes[i])!;
-					serializer.Populate(tupleArray[i].CreateReader(), args[i]);
-				}
-			}
-			var result = Activator.CreateInstance(innerType, args);
-			return result;
+				args[i] = CreateInnerTypeObject(tupleTypes[i], tupleArray[i], serializer);
+			return Activator.CreateInstance(innerType, args)!;
 		}
 
 		void ReadDataToArray(JArray source, Array target, JsonSerializer serializer, Type innerType)
@@ -170,6 +146,7 @@ namespace JsonPolymorph
 
 				if (element is JArray jArray)
 				{
+					//array can be either kvp or valueTuple with various arguments, exciting, deserialize them
 					if (innerType.IsKeyValuePair())
 						created = CreateKvp(jArray, innerType, serializer);
 					if (innerType.IsValueTuple())
@@ -177,7 +154,7 @@ namespace JsonPolymorph
 					target.SetValue(created, i++ - 1);
 					continue;
 				}
-				
+
 				var splt = element[typeKey]!.ToString().Split('\\');
 				string assemblyName = splt[0], typeFullName = splt[1];
 				try
@@ -219,7 +196,7 @@ namespace JsonPolymorph
 				serializer.Populate(element.CreateReader(), typeAnnotation);
 				innerType = typeAnnotation.LoadTypeFromAssembly(skipUnresolvedTypes);
 				//failed to load types
-				if(innerType == null)
+				if (innerType == null)
 					return false;
 				arr = Array.CreateInstance(innerType, jarray.Count - 1);
 
@@ -251,31 +228,17 @@ namespace JsonPolymorph
 			//non-collection object
 			if (!TryGetContainerType(objectType, out _))
 			{
-				var element = JObject.Load(reader);
-				var splt = element[typeKey]!.ToString().Split('\\');
-				string assemblyName = splt[0], typeFullName = splt[1];
-				object created = null;
-				try
-				{
-					created = Activator.CreateInstance(Assembly.Load(assemblyName).GetType(typeFullName)!)!;
-					serializer.Populate(reader, created);
-				}
-				catch (Exception e)
-				{
-					if (!skipUnresolvedTypes)
-						throw new JsonPolymorphAnnotationException("JsonPolymporph container type defined in annotation not resolved inside " +
-							"solution. You may be missing some libraries.");
-					created = null!;
-				}
-				return created;
+				if (!skipUnresolvedTypes)
+					throw new JsonPolymorphAnnotationException("JsonPolymporph container type defined in annotation not resolved inside " +
+						"solution. You may be missing some libraries.");
 			}
 			// Load JObject from stream
 			JArray root = JArray.Load(reader);
-			
+
 			Array arr = null;
 			bool useGenericType = false;
 			Type containerType = null, innerType = null;
-			
+
 			TryCreateContainerType(root, serializer, out containerType, out innerType, out arr);
 			useGenericType = !containerType.IsArray && containerType.IsGenericType;
 			ReadDataToArray(root, arr, serializer, innerType);
@@ -295,7 +258,7 @@ namespace JsonPolymorph
 				{
 					return Activator.CreateInstance(containerType, arr)!;
 				}
-				catch(Exception e)
+				catch (Exception e)
 				{
 					if (!skipUnresolvedTypes)
 						throw new JsonPolymorphAnnotationException("Cannot create the instance of container. The container class may " +
@@ -318,10 +281,26 @@ namespace JsonPolymorph
 				}
 				catch (Exception e)
 				{
-					if(!skipUnresolvedTypes)
+					if (!skipUnresolvedTypes)
 						throw new JsonPolymorphAnnotationException("Type defined in annotation can not be loaded! You may be missing dlls.", e);
 					return null;
 				}
+			}
+		}
+
+		JToken CreateJTokenFromType(Type type, object value, JsonSerializer serializer)
+		{
+			if (type.IsJValueType())
+				return JToken.FromObject(value, serializer);
+			else
+			{
+				JObject joKey = JObject.FromObject(value, serializer);
+				if (InnerContainerTypeHandlable(type) && type.IsInterface)
+				{
+					var kvpKeyRealType = value.GetType();
+					joKey.Add(typeKey, $"{kvpKeyRealType.Assembly.FullName}\\{kvpKeyRealType.FullName}");
+				}
+				return joKey;
 			}
 		}
 
@@ -332,121 +311,85 @@ namespace JsonPolymorph
 			(var kvpKey, var kvpValue) = vt.GetKeyValuePairValues(value);
 			(var kvpKeyType, var kvpValueType) = vt.GetKeyValuePairTypes();
 
-			JArray kvpJArr = new JArray();
-			//if is kind-of primitive type, use JValue
-			if (kvpKeyType.IsJValueType())
-				kvpJArr.Add(JValue.FromObject(kvpKey, serializer));
-			else //otherwise this should be serialized via serializer
+			JArray kvpJArr = new JArray
 			{
-				JObject joKey = JObject.FromObject(kvpKey, serializer);
-				//if key is interface add annotation
-				if (InnerContainerTypeHandlable(kvpKeyType) && kvpKeyType.IsInterface)
-				{
-					var kvpKeyRealType = kvpKey.GetType();
-					joKey.Add(typeKey, $"{kvpKeyRealType.Assembly.FullName}\\{kvpKeyRealType.FullName}");
-				}
-				kvpJArr.Add(joKey);
-			}
-
-			if (kvpValueType != null && kvpValueType.IsJValueType())
-				kvpJArr.Add(new JValue(kvpValue));
-			else
-			{
-				//anyway add value
-				JObject joValue = JObject.FromObject(kvpValue, serializer);
-				//if value is interface add annotation
-				if (kvpValueType != null && InnerContainerTypeHandlable(kvpValueType))
-				{
-					var kvpValueRealType = kvpValue.GetType();
-					joValue.Add(typeKey, $"{kvpValueRealType.Assembly.FullName}\\{kvpValueRealType.FullName}");
-				}
-				kvpJArr.Add(joValue);
-			}
+				CreateJTokenFromType(kvpKeyType, kvpKey, serializer),
+				CreateJTokenFromType(kvpValueType, kvpValue, serializer)
+			};
 			return kvpJArr;
 		}
 
 		JArray CreateJArrayFromTuple(object? value, JsonSerializer serializer)
 		{
-			var vt = value.GetType();
 			JArray tupleJArr = new JArray();
+			var vt = value.GetType();
 			int i = 0;
 			var tupleTypes = vt.GetTupleTypes();
 			foreach (var tupleVal in vt.GetTupleValues(value))
-			{
-				if (tupleTypes[i].IsJValueType())
-					tupleJArr.Add(JToken.FromObject(tupleVal, serializer));
-				else
-				{
-					JObject joKey = JObject.FromObject(tupleVal, serializer);
-					if (InnerContainerTypeHandlable(tupleTypes[i]) && tupleTypes[i].IsInterface)
-					{
-						var kvpKeyRealType = tupleVal.GetType();
-						joKey.Add(typeKey, $"{kvpKeyRealType.Assembly.FullName}\\{kvpKeyRealType.FullName}");
-					}
-					tupleJArr.Add(joKey);
-				}
-				i++;
-			}
+				tupleJArr.Add(CreateJTokenFromType(tupleTypes[i++], tupleVal, serializer));
 			return tupleJArr;
 		}
 
-		public override void WriteJson(JsonWriter writer, object? value, JsonSerializer serializer)
+		JToken CreateCustomJToken(object obj, JsonSerializer serializer, out Type type)
 		{
-			if (value is not IEnumerable enumerable)
+			type = obj.GetType();
+			if (type.IsGenericType)
 			{
-				var vt = value.GetType();
-				if (vt.IsGenericType)
-				{
-					if (vt.IsValueTuple())
-					{
-						CreateJArrayFromTuple(value, serializer).WriteTo(writer);
-						return;
-					}
-					if (vt.IsKeyValuePair())
-					{
-						CreateJArrayFromKvp(value, serializer).WriteTo(writer);
-						return;
-					}
-				}
-				JObject jo = JObject.FromObject(value, serializer);
-				var type = value.GetType();
-				jo.Add(typeKey, $"{type.Assembly.FullName}\\{type.FullName}");
-				jo.WriteTo(writer);
-				//throw new JsonPolymorphTypeException("Cannot cast container type to IEnumerable, KeyValuePair and Tuple!");
-				return;
+				if (type.IsValueTuple())
+					return CreateJArrayFromTuple(obj, serializer);
+				if (type.IsKeyValuePair())
+					return CreateJArrayFromKvp(obj, serializer);
 			}
-			JArray array = new JArray();
+			return null!;
+		}
+
+		JObject GetContainerAnnotationTypeObject(object? value)
+		{
 			if (TryGetContainerType(value, out var containerInnerType))
 				if (InnerContainerTypeHandlable(containerInnerType))
-					array.Add(JObject.FromObject(new TypeAnnotation()
+					return JObject.FromObject(new TypeAnnotation()
 					{
 						innerAsmName = containerInnerType.Assembly.FullName!,
 						innerTypeName = containerInnerType.FullName!,
 						containerAsmName = value.GetType().Assembly.FullName!,
 						containerType = value.GetType().IsGenericType ? value.GetType().GetGenericTypeDefinition().FullName! : value.GetType().FullName!
-					}));
-				else return;
+					});
+				//leave container without annotation
+				else return null;
 			else
-				throw new JsonPolymorphTypeException("Type mismatch: serialized value is not a container!"); 
+				throw new JsonPolymorphTypeException("Type mismatch: serialized value is not a container!");
+		}
 
-			foreach (var i in enumerable)
+		public override void WriteJson(JsonWriter writer, object? value, JsonSerializer serializer)
+		{
+			if (value is IEnumerable enumerable)
 			{
-				Type type = i.GetType();
-				if (type.IsGenericType)
-				{
-					if (type.IsValueTuple())
-						array.Add(CreateJArrayFromTuple(i, serializer));
-					if (type.IsKeyValuePair())
-						array.Add(CreateJArrayFromKvp(i, serializer));
-				}
-				else
-				{
-					JObject jo = JObject.FromObject(i, serializer);
-					jo.Add(typeKey, $"{type.Assembly.FullName}\\{type.FullName}");
+				JArray array = new JArray();
+				JObject jo = null;
+				if ((jo = GetContainerAnnotationTypeObject(value)) != null)
 					array.Add(jo);
+				foreach (var i in enumerable)
+				{
+					JToken jt = null;
+					if ((jt = CreateCustomJToken(i, serializer, out var type)) != null)
+						array.Add(jt);
+					else
+					{
+						JObject elemJo = JObject.FromObject(i, serializer);
+						elemJo.Add(typeKey, $"{type.Assembly.FullName}\\{type.FullName}");
+						array.Add(elemJo);
+					}
 				}
+				array.WriteTo(writer);
 			}
-			array.WriteTo(writer);
+			else
+			{
+				JToken jt = null;
+				if ((jt = CreateCustomJToken(value, serializer, out var type)) != null)
+					jt.WriteTo(writer);
+				else 
+					throw new JsonPolymorphTypeException("Cannot cast container type to IEnumerable, KeyValuePair and Tuple!");
+			}
 		}
 	}
 }
