@@ -93,16 +93,20 @@ namespace JsonPolymorph
 
 		bool TryGetContainerType(Type objectType, out Type containerInnerType)
 		{
+			containerInnerType = null!;
+			if (objectType == null)
+				return false;
 			if (useCaches && containersInnerTypes.ContainsKey(objectType))
 			{
 				containerInnerType = containersInnerTypes[objectType];
 				return containerInnerType != null;
 			}
 			var result = _TryGetContainerType(objectType, out containerInnerType);
-			if (result)
-				containersInnerTypes.Add(objectType, containerInnerType);
-			else
-				containersInnerTypes.Add(objectType, null);
+			if (useCaches)
+				if (result)
+					containersInnerTypes.Add(objectType, containerInnerType);
+				else
+					containersInnerTypes.Add(objectType, null);
 			return result;
 		}
 		bool TryGetContainerType(object source, out Type containerInnerType) 
@@ -425,6 +429,7 @@ namespace JsonPolymorph
 				return;
 			containersInnerTypes.Clear();
 			assemblies.Clear();
+			assemblyTypes.Clear();
 		}
 	}
 }
