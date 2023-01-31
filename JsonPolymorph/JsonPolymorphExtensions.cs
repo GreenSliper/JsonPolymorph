@@ -10,6 +10,11 @@ namespace JsonPolymorph
 {
 	internal static class JsonPolymorphExtensions
 	{
+		public static Func<object?[], object> GetConstructor(this Type type)
+		{
+			return type.GetConstructor(flags, Type.EmptyTypes).Invoke;
+		}
+
 		public static IEnumerable<Type> GetParentTypes(this Type type)
 		{
 			// is there any base type?
