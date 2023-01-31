@@ -22,7 +22,7 @@ settings.Converters.Add(converter);
 var list = new List<IBar>()
 {
 	new C(),
-	new D() { Foo = new A() { a = "single interface"} },
+	new D() { Foo = new A() { a = "Single interface"} },
 	new E() 
 	{ 
 		bars = new IBar[2] { 
