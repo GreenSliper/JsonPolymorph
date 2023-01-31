@@ -12,6 +12,9 @@ Added custom behaviour for Tuple and KeyValuePair classes (some generic types ma
 
 Converter does not affect any other Newtonsoft.JSON attributes (you can test it with JsonIgnoreAttribute, for example).
 
+# Tests
+Solution contains xUnit tests in separate project.
+
 # Example
 JsonPolymorphConsole contains an example in Program.cs. It shows how you can serialize and deserialize interface collections and arrays.
 The example also uses the simple JsonSingleTypeConverter in JsonConverterAttribute (from Newtonsoft.JSON). It can be used this way:
