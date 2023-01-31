@@ -1,4 +1,5 @@
 ﻿
+using JsonPolymorph;
 using Newtonsoft.Json;
 
 namespace SampleClassLibrary
@@ -30,6 +31,8 @@ namespace SampleClassLibrary
 	public class D : IBar
 	{
 		public string b = "sample data";
+		[JsonConverter(typeof(JsonSingleTypeConverter<IFoo>))]
+		public IFoo Foo { get; set; }
 		[JsonIgnore]
 		public string IgnoredString { get; set; }
 		public Dictionary<string, string> dictTest = new Dictionary<string, string>() { { "1", "a" }, { "2", "b" } };
@@ -39,5 +42,8 @@ namespace SampleClassLibrary
 	{
 		public IBar[] bars;
 		public Dictionary<string, IFoo> foos;
+		public Dictionary<IFoo, string> foosReversed;
+		public List<KeyValuePair<string, IFoo>> keyValuePairTest;
+		public List<(IFoo, int)> tupleTest;
 	}
 }
