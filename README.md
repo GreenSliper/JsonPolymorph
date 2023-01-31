@@ -4,6 +4,7 @@ This project is an add-on for Newtonsoft.JSON. Simple JsonConverter allows you t
 # Requirements
 - .Net 6.0 (earlier versions not tested, may be compatible but without null-forgiving operator)
 - Newtonsoft.JSON package
+- xUnit (tests)
 
 # Idea
 PolymorphJsonConverter adds to json assembly and type names for interface-referenced objects. During deserialization, assemblies and types are loaded and instantiated via Activator class.
